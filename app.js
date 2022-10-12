@@ -6,7 +6,6 @@ const FACTS = [
   ["Ηττώ υπέρ δικαίου","Sométete a la justicia"],
   ["Γνῶθι μαθών","Aprende a aprender"],
   ["Ακούσας νόει","Reflexiona sobre lo que hayas escuchado"],
-  ["Γνῶθι σαυτόν","Conócete a ti mismo"],
   ["Εστίαν τίμα","Honra tu casa"],
   ["Άρχε σεαυτού","Manda de ti mismo"],
   ["Φίλους βοήθει","Ayuda a tus amigos"],
