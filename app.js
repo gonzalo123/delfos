@@ -90,7 +90,9 @@ const FACTS = [
   ["Τελεύτα άλυπος","Muere exento de sufrimiento"]
 ];
 
-(function refresh() {
+
+var refresh = function() {
   [this.fact_text_greek.innerHTML, this.fact_text.innerHTML] = FACTS[Math.floor(Math.random() * FACTS.length)];
-  setTimeout(refresh, 9000);
-})();
+  setTimeout(myFnc, 4000);
+};
+refresh();
