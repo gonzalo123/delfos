@@ -1,48 +1,21 @@
-// Greek pottery background images - direct URLs
-const BG_IMAGES = [
+// Local, GitHub Pages-safe image rotation. The two very large source files stay
+// out of the homepage path so a new tab remains quick to load.
+const PLATE_IMAGES = [
   "./960px-Amphora_birth_Athena_Louvre_F32.jpg",
   "./960px-Dionysos_satyrs_Cdm_Paris_575.jpg",
   "./960px-Heracles_Geryon_Louvre_F55.jpg",
-  "./960px-Akhilleus_Penthesileia_Staatliche_Antikensammlungen_1502.jpg",
-  "./Exekias_-_ABV_146_21_-_Dionysos_reclining_in_a_ship_-_fight_-_München_AS_8729_-_04.jpg",
-  "./960px-Thetis_Peleus_Cdm_Paris_539.jpg"
+  "./960px-Akhilleus_Penthesileia_Staatliche_Antikensammlungen_1502.jpg"
 ];
 
-let currentBgIndex = 0;
-let bgElements = [];
-
-function initBackgrounds() {
-  bgElements = [
-    document.getElementById('bg1'),
-    document.getElementById('bg2'),
-    document.getElementById('bg3')
-  ];
-
-  bgElements.forEach((el, idx) => {
-    el.style.backgroundImage = `url(${BG_IMAGES[idx % BG_IMAGES.length]})`;
-  });
-
-  setInterval(rotateBackground, 12000);
-}
-
-function rotateBackground() {
-  const currentEl = bgElements[currentBgIndex % bgElements.length];
-  const nextIndex = (currentBgIndex + 1) % bgElements.length;
-  const nextEl = bgElements[nextIndex];
-
-  const nextImageIndex = (currentBgIndex + bgElements.length) % BG_IMAGES.length;
-  nextEl.style.backgroundImage = `url(${BG_IMAGES[nextImageIndex]})`;
-
-  currentEl.classList.remove('active');
-  nextEl.classList.add('active');
-
-  currentBgIndex = nextIndex;
-}
+const ORACLE_INTERVAL = 16000;
+const CERAMIC_INTERVAL = 18000;
+const GREEK_CHARS = 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ';
+const SPANISH_CHARS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ';
 
 const FACTS = [
   ["Έπου θεῴ","Obedece al dios"],
   ["Νόμοις πείθου","Obedece a las leyes"],
-  ["Θεούς σέβου","Respeta a a los dioses"],
+  ["Θεούς σέβου","Respeta a los dioses"],
   ["Γονείς αίδου","Respeta a tus padres"],
   ["Ηττώ υπέρ δικαίου","Sométete a la justicia"],
   ["Γνῶθι μαθών","Aprende a aprender"],
@@ -97,7 +70,7 @@ const FACTS = [
   ["Γλώττης άρχε","Domina tu lengua"],
   ["Σεαυτόν ευ ποίει", "Hazte el bien a ti mismo"],
   ["Ευπροσήγορος γίνου","Sé amable con todos"],
-  ["Αποκρίνου εν *καιρῴ", "Responde en el momento oportuno"],
+  ["Αποκρίνου εν καιρῴ", "Responde en el momento oportuno"],
   ["Πόνει μετά δικαίου","Esfuérzate más allá de lo necesario"],
   ["Πράττε αμετανοήτως","Actúa sin arrepentimiento"],
   ["Αμαρτάνων μετανόει","Arrepiéntete cuando te equivoques"],
@@ -130,114 +103,161 @@ const FACTS = [
   ["Τελεύτα άλυπος","Muere exento de sufrimiento"]
 ];
 
-const GREEK_CHARS = ['Α', 'Β', 'Γ', 'Δ', 'Ε', 'Ζ', 'Η', 'Θ', 'Ι', 'Κ', 'Λ', 'Μ', 'Ν', 'Ξ', 'Ο', 'Π', 'Ρ', 'Σ', 'Τ', 'Υ', 'Φ', 'Χ', 'Ψ', 'Ω'];
-const SPANISH_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ';
+let maximDeck = [];
+let oracleTimer;
+let ceramicTimer;
+let ceramicIndex = 0;
+let activeCeramicLayer = 0;
 
-let currentMaxim = null;
-let isTransitioning = false;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const ROTATING_MAXIM_INDEXES = FACTS
+  .map((_, index) => index)
+  .filter((index) => FACTS[index][0] !== "Μηδέν άγαν");
 
-function getRandomChar(isGreek) {
-  if (isGreek) {
-    return GREEK_CHARS[Math.floor(Math.random() * GREEK_CHARS.length)];
+function shuffle(values) {
+  const copy = [...values];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
   }
-  return SPANISH_CHARS[Math.floor(Math.random() * SPANISH_CHARS.length)];
+  return copy;
 }
 
-function scrambleText(element, targetText, isGreek, callback) {
-  let iterations = 0;
-  const maxIterations = 20;
-  const interval = setInterval(() => {
-    element.innerHTML = targetText
-      .split('')
-      .map((char, index) => {
-        if (char === ' ') return ' ';
-        if (index < iterations) {
-          return targetText[index];
-        }
-        return getRandomChar(isGreek);
-      })
-      .join('');
-
-    iterations += 1;
-
-    if (iterations > maxIterations) {
-      clearInterval(interval);
-      element.innerHTML = targetText;
-      if (callback) callback();
-    }
-  }, 40);
+function nextMaximIndex() {
+  if (maximDeck.length === 0) {
+    maximDeck = shuffle(ROTATING_MAXIM_INDEXES);
+  }
+  return maximDeck.pop();
 }
 
-function applyGlitchEffect(element, callback) {
-  element.classList.add('text-glitch');
-  setTimeout(() => {
-    element.classList.remove('text-glitch');
-    if (callback) callback();
-  }, 300);
+function randomCharacter(alphabet) {
+  return alphabet[Math.floor(Math.random() * alphabet.length)];
 }
 
-function applyFlickerEffect(element, callback) {
-  element.classList.add('flicker');
-  setTimeout(() => {
-    element.classList.remove('flicker');
-    if (callback) callback();
-  }, 450);
-}
+function scrambleText(element, targetText, alphabet) {
+  if (prefersReducedMotion.matches) {
+    element.textContent = targetText;
+    return Promise.resolve();
+  }
 
-function applyContainerGlitch(container, callback) {
-  container.classList.add('glitch-active');
-  setTimeout(() => {
-    container.classList.remove('glitch-active');
-    if (callback) callback();
-  }, 300);
-}
+  const characters = [...targetText];
+  const totalFrames = 24;
+  let frame = 0;
 
-function changeMaxim() {
-  if (isTransitioning) return;
-  isTransitioning = true;
+  return new Promise((resolve) => {
+    const interval = window.setInterval(() => {
+      const resolvedCharacters = Math.floor((frame / totalFrames) * characters.length);
 
-  const factText = document.getElementById('fact_text');
-  const factTextGreek = document.getElementById('fact_text_greek');
-  const container = document.getElementById('maxim-container');
+      element.textContent = characters
+        .map((character, index) => {
+          if (/\s|[.,;:·—'’!?]/u.test(character) || index < resolvedCharacters) {
+            return character;
+          }
+          return randomCharacter(alphabet);
+        })
+        .join('');
 
-  let newMaxim;
-  do {
-    newMaxim = FACTS[Math.floor(Math.random() * FACTS.length)];
-  } while (currentMaxim && newMaxim[0] === currentMaxim[0]);
+      frame += 1;
 
-  currentMaxim = newMaxim;
-  const [greek, spanish] = newMaxim;
-
-  applyContainerGlitch(container, () => {
-    applyGlitchEffect(factText, () => {
-      applyFlickerEffect(factTextGreek, () => {
-        scrambleText(factText, spanish, false, () => {
-          scrambleText(factTextGreek, greek, true, () => {
-            isTransitioning = false;
-          });
-        });
-      });
-    });
+      if (frame > totalFrames) {
+        window.clearInterval(interval);
+        element.textContent = targetText;
+        resolve();
+      }
+    }, 38);
   });
 }
 
-function refresh() {
-  changeMaxim();
-  setTimeout(refresh, 4000);
+function restartProgress() {
+  const progress = document.getElementById('oracle-progress');
+  progress.classList.remove('running');
+  // Restarting a CSS animation requires one layout read between state changes.
+  void progress.offsetWidth;
+  if (!prefersReducedMotion.matches && !document.hidden) {
+    progress.classList.add('running');
+  }
 }
+
+function scheduleOracle() {
+  window.clearTimeout(oracleTimer);
+  restartProgress();
+  if (!document.hidden) {
+    oracleTimer = window.setTimeout(showNextMaxim, ORACLE_INTERVAL);
+  }
+}
+
+async function showNextMaxim() {
+  const panel = document.getElementById('oraculo');
+  const greekText = document.getElementById('fact_text_greek');
+  const spanishText = document.getElementById('fact_text');
+  const counter = document.getElementById('oracle-number');
+  const maximIndex = nextMaximIndex();
+  const [greek, spanish] = FACTS[maximIndex];
+
+  counter.textContent = String(maximIndex + 1).padStart(3, '0');
+
+  panel.classList.add('is-scrambling');
+  await Promise.all([
+    scrambleText(greekText, greek, GREEK_CHARS),
+    scrambleText(spanishText, spanish, SPANISH_CHARS)
+  ]);
+  panel.classList.remove('is-scrambling');
+
+  scheduleOracle();
+}
+
+function setCeramicImage(layer, imageIndex) {
+  layer.style.backgroundImage = `url("${PLATE_IMAGES[imageIndex]}")`;
+}
+
+function rotateCeramic() {
+  const layers = [
+    document.getElementById('ceramic-a'),
+    document.getElementById('ceramic-b')
+  ];
+  const currentLayer = layers[activeCeramicLayer];
+  const nextLayerIndex = activeCeramicLayer === 0 ? 1 : 0;
+  const nextLayer = layers[nextLayerIndex];
+
+  ceramicIndex = (ceramicIndex + 1) % PLATE_IMAGES.length;
+  setCeramicImage(nextLayer, ceramicIndex);
+  nextLayer.classList.add('active');
+  currentLayer.classList.remove('active');
+  activeCeramicLayer = nextLayerIndex;
+
+}
+
+function scheduleCeramicRotation() {
+  window.clearInterval(ceramicTimer);
+  if (!document.hidden && !prefersReducedMotion.matches) {
+    ceramicTimer = window.setInterval(rotateCeramic, CERAMIC_INTERVAL);
+  }
+}
+
+function initCeramics() {
+  setCeramicImage(document.getElementById('ceramic-a'), ceramicIndex);
+  const nextPlate = new Image();
+  nextPlate.src = PLATE_IMAGES[1];
+  scheduleCeramicRotation();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    window.clearTimeout(oracleTimer);
+    window.clearInterval(ceramicTimer);
+    document.getElementById('oracle-progress').classList.remove('running');
+  } else {
+    scheduleOracle();
+    scheduleCeramicRotation();
+  }
+});
+
+prefersReducedMotion.addEventListener('change', () => {
+  scheduleOracle();
+  scheduleCeramicRotation();
+});
 
 document.addEventListener('DOMContentLoaded', () => {
-  const factText = document.getElementById('fact_text');
-  const factTextGreek = document.getElementById('fact_text_greek');
-
-  initBackgrounds();
-
-  const initialMaxim = FACTS[Math.floor(Math.random() * FACTS.length)];
-  currentMaxim = initialMaxim;
-
-  scrambleText(factText, initialMaxim[1], false, () => {
-    scrambleText(factTextGreek, initialMaxim[0], true, () => {
-      setTimeout(refresh, 4000);
-    });
-  });
+  initCeramics();
+  showNextMaxim();
 });
