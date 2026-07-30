@@ -108,6 +108,7 @@ let oracleTimer;
 let ceramicTimer;
 let ceramicIndex = 0;
 let activeCeramicLayer = 0;
+let currentTilt = -2.5;
 
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const ROTATING_MAXIM_INDEXES = FACTS
@@ -132,6 +133,13 @@ function nextMaximIndex() {
 
 function randomCharacter(alphabet) {
   return alphabet[Math.floor(Math.random() * alphabet.length)];
+}
+
+function nextMaximTilt() {
+  const direction = currentTilt < 0 ? 1 : -1;
+  const magnitude = 1.8 + Math.random() * 1.5;
+  currentTilt = Number((direction * magnitude).toFixed(2));
+  return `${currentTilt}deg`;
 }
 
 function scrambleText(element, targetText, alphabet) {
@@ -195,6 +203,7 @@ async function showNextMaxim() {
   const [greek, spanish] = FACTS[maximIndex];
 
   counter.textContent = String(maximIndex + 1).padStart(3, '0');
+  panel.style.setProperty('--maxim-tilt', nextMaximTilt());
 
   panel.classList.add('is-scrambling');
   await Promise.all([

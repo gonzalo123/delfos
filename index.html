@@ -82,6 +82,26 @@
             animation: grain-shift .24s steps(2) infinite;
         }
 
+        .scanline {
+            position: fixed;
+            top: -10px;
+            right: 0;
+            left: 0;
+            z-index: 90;
+            height: 7px;
+            pointer-events: none;
+            background: linear-gradient(
+                180deg,
+                transparent,
+                rgba(238, 227, 200, .12),
+                rgba(207, 84, 38, .48),
+                transparent
+            );
+            box-shadow: 0 0 14px rgba(207, 84, 38, .22);
+            mix-blend-mode: screen;
+            animation: scanline-pass 7s linear infinite;
+        }
+
         .page {
             height: 100vh;
             height: 100svh;
@@ -216,7 +236,7 @@
             min-width: 0;
             min-height: 0;
             display: grid;
-            grid-template-columns: minmax(0, 1.5fr) minmax(290px, .5fr);
+            grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr);
         }
 
         .foundation {
@@ -368,6 +388,9 @@
             font-weight: 700;
             line-height: .98;
             text-transform: uppercase;
+            transform: rotate(var(--maxim-tilt, -2.5deg)) translateX(-.2rem);
+            transform-origin: left center;
+            transition: transform .45s var(--ease);
         }
 
         #fact_text {
@@ -378,6 +401,9 @@
             letter-spacing: .04em;
             line-height: 1.35;
             text-transform: uppercase;
+            transform: rotate(var(--maxim-tilt, -2.5deg)) translateX(.55rem);
+            transform-origin: left center;
+            transition: transform .45s var(--ease);
         }
 
         .oracle-progress {
@@ -497,6 +523,13 @@
             100% { transform: translate(-2%, -2%); }
         }
 
+        @keyframes scanline-pass {
+            0% { transform: translateY(-12px); opacity: 0; }
+            8% { opacity: .8; }
+            92% { opacity: .8; }
+            100% { transform: translateY(100svh); opacity: 0; }
+        }
+
         @keyframes oracle-timer {
             to { transform: scaleX(1); }
         }
@@ -511,7 +544,7 @@
             }
 
             .upper-stage {
-                grid-template-columns: minmax(0, 1fr) 250px;
+                grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
             }
 
             .primary-nav a {
@@ -692,12 +725,17 @@
             .grain {
                 animation: none;
             }
+
+            .scanline {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
     <a class="skip-link" href="#oraculo">Ir a la máxima actual</a>
     <div class="grain" aria-hidden="true"></div>
+    <div class="scanline" aria-hidden="true"></div>
 
     <div class="page">
         <header class="masthead">
