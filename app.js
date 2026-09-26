@@ -1,17 +1,4 @@
-// Local, GitHub Pages-safe image rotation. The two very large source files stay
-// out of the homepage path so a new tab remains quick to load.
-const PLATE_IMAGES = [
-  "./960px-Amphora_birth_Athena_Louvre_F32.jpg",
-  "./960px-Dionysos_satyrs_Cdm_Paris_575.jpg",
-  "./960px-Heracles_Geryon_Louvre_F55.jpg",
-  "./960px-Akhilleus_Penthesileia_Staatliche_Antikensammlungen_1502.jpg"
-];
-
-const ORACLE_INTERVAL = 16000;
-const CERAMIC_INTERVAL = 18000;
-const GREEK_CHARS = 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ';
-const SPANISH_CHARS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ';
-
+// The original Greek and Spanish collection is kept intact.
 const FACTS = [
   ["Έπου θεῴ","Obedece al dios"],
   ["Νόμοις πείθου","Obedece a las leyes"],
@@ -103,17 +90,33 @@ const FACTS = [
   ["Τελεύτα άλυπος","Muere exento de sufrimiento"]
 ];
 
-let maximDeck = [];
-let oracleTimer;
-let ceramicTimer;
-let ceramicIndex = 0;
-let activeCeramicLayer = 0;
-let currentTilt = -2.5;
 
+const ORACLE_INTERVAL = 16000;
+const MAXIM_EXIT_DURATION = 240;
+const MAXIM_WORD_DURATION = 780;
+const MAXIM_WORD_STAGGER = 55;
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const ROTATING_MAXIM_INDEXES = FACTS
-  .map((_, index) => index)
-  .filter((index) => FACTS[index][0] !== "Μηδέν άγαν");
+const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+const $ = (id) => document.getElementById(id);
+const archive = $('archive');
+const progress = $('oracle-progress');
+const rotatingIndexes = FACTS.map((_, index) => index)
+  .filter((index) => FACTS[index][0] !== 'Μηδέν άγαν');
+let maximDeck = [];
+let currentIndex = -1;
+let oracleTimer = 0;
+let transitionTimer = 0;
+let clockTimer = 0;
+let startedAt = 0;
+let remaining = ORACLE_INTERVAL;
+let isChanging = false;
+let contemplating = false;
+let paused = false;
+let pendingMaximIndex = null;
+let activeWave = null;
+
+// Storage may be unavailable in private tabs or when opened as a local file.
+try { paused = localStorage.getItem('delfos-paused') === 'true'; } catch { /* Optional preference. */ }
 
 function shuffle(values) {
   const copy = [...values];
@@ -125,148 +128,300 @@ function shuffle(values) {
 }
 
 function nextMaximIndex() {
-  if (maximDeck.length === 0) {
-    maximDeck = shuffle(ROTATING_MAXIM_INDEXES);
+  if (!maximDeck.length) {
+    maximDeck = shuffle(rotatingIndexes);
+    // A fresh deck also avoids repeating the last item of the previous cycle.
+    if (maximDeck.at(-1) === currentIndex) {
+      [maximDeck[0], maximDeck[maximDeck.length - 1]] = [maximDeck.at(-1), maximDeck[0]];
+    }
   }
   return maximDeck.pop();
 }
 
-function randomCharacter(alphabet) {
-  return alphabet[Math.floor(Math.random() * alphabet.length)];
+function stopOracleTimer() {
+  if (!oracleTimer) return;
+  window.clearTimeout(oracleTimer);
+  remaining = Math.max(0, remaining - (performance.now() - startedAt));
+  oracleTimer = 0;
 }
 
-function nextMaximTilt() {
-  const direction = currentTilt < 0 ? 1 : -1;
-  const magnitude = 1.8 + Math.random() * 1.5;
-  currentTilt = Number((direction * magnitude).toFixed(2));
-  return `${currentTilt}deg`;
-}
-
-function scrambleText(element, targetText, alphabet) {
-  if (prefersReducedMotion.matches) {
-    element.textContent = targetText;
-    return Promise.resolve();
-  }
-
-  const characters = [...targetText];
-  const totalFrames = 24;
-  let frame = 0;
-
-  return new Promise((resolve) => {
-    const interval = window.setInterval(() => {
-      const resolvedCharacters = Math.floor((frame / totalFrames) * characters.length);
-
-      element.textContent = characters
-        .map((character, index) => {
-          if (/\s|[.,;:·—'’!?]/u.test(character) || index < resolvedCharacters) {
-            return character;
-          }
-          return randomCharacter(alphabet);
-        })
-        .join('');
-
-      frame += 1;
-
-      if (frame > totalFrames) {
-        window.clearInterval(interval);
-        element.textContent = targetText;
-        resolve();
-      }
-    }, 38);
-  });
-}
-
-function restartProgress() {
-  const progress = document.getElementById('oracle-progress');
-  progress.classList.remove('running');
-  // Restarting a CSS animation requires one layout read between state changes.
-  void progress.offsetWidth;
-  if (!prefersReducedMotion.matches && !document.hidden) {
+function syncPlayback(reset = false) {
+  stopOracleTimer();
+  syncMotionState();
+  if (reset) {
+    remaining = ORACLE_INTERVAL;
+    progress.classList.remove('running');
+    // One layout read restarts the CSS clock along with the reading timer.
+    void progress.offsetWidth;
     progress.classList.add('running');
   }
-}
-
-function scheduleOracle() {
-  window.clearTimeout(oracleTimer);
-  restartProgress();
-  if (!document.hidden) {
-    oracleTimer = window.setTimeout(showNextMaxim, ORACLE_INTERVAL);
+  const suspended = paused || contemplating || archive.open || document.hidden || isChanging;
+  progress.classList.toggle('is-paused', suspended);
+  if (!suspended) {
+    startedAt = performance.now();
+    oracleTimer = window.setTimeout(() => {
+      oracleTimer = 0;
+      showMaxim(nextMaximIndex());
+    }, remaining);
   }
 }
 
-async function showNextMaxim() {
-  const panel = document.getElementById('oraculo');
-  const greekText = document.getElementById('fact_text_greek');
-  const spanishText = document.getElementById('fact_text');
-  const counter = document.getElementById('oracle-number');
-  const maximIndex = nextMaximIndex();
-  const [greek, spanish] = FACTS[maximIndex];
-
-  counter.textContent = String(maximIndex + 1).padStart(3, '0');
-  panel.style.setProperty('--maxim-tilt', nextMaximTilt());
-
-  panel.classList.add('is-scrambling');
-  await Promise.all([
-    scrambleText(greekText, greek, GREEK_CHARS),
-    scrambleText(spanishText, spanish, SPANISH_CHARS)
-  ]);
-  panel.classList.remove('is-scrambling');
-
-  scheduleOracle();
-}
-
-function setCeramicImage(layer, imageIndex) {
-  layer.style.backgroundImage = `url("${PLATE_IMAGES[imageIndex]}")`;
-}
-
-function rotateCeramic() {
-  const layers = [
-    document.getElementById('ceramic-a'),
-    document.getElementById('ceramic-b')
-  ];
-  const currentLayer = layers[activeCeramicLayer];
-  const nextLayerIndex = activeCeramicLayer === 0 ? 1 : 0;
-  const nextLayer = layers[nextLayerIndex];
-
-  ceramicIndex = (ceramicIndex + 1) % PLATE_IMAGES.length;
-  setCeramicImage(nextLayer, ceramicIndex);
-  nextLayer.classList.add('active');
-  currentLayer.classList.remove('active');
-  activeCeramicLayer = nextLayerIndex;
-
-}
-
-function scheduleCeramicRotation() {
-  window.clearInterval(ceramicTimer);
-  if (!document.hidden && !prefersReducedMotion.matches) {
-    ceramicTimer = window.setInterval(rotateCeramic, CERAMIC_INTERVAL);
+function syncMotionState() {
+  const suspended = paused || contemplating || archive.open || document.hidden;
+  document.body.classList.toggle('motion-paused', suspended);
+  if (suspended || prefersReducedMotion.matches) {
+    if (activeWave) activeWave.cancel();
+    activeWave = null;
+    resetArt();
   }
 }
 
-function initCeramics() {
-  setCeramicImage(document.getElementById('ceramic-a'), ceramicIndex);
-  const nextPlate = new Image();
-  nextPlate.src = PLATE_IMAGES[1];
-  scheduleCeramicRotation();
+function pulseOracle() {
+  if (prefersReducedMotion.matches || paused || contemplating || archive.open || document.hidden) return;
+  if (activeWave) activeWave.cancel();
+  const wave = $('oracle-wave').animate([
+    { transform: 'scale(.84)', opacity: 0, offset: 0 },
+    { transform: 'scale(.91)', opacity: .65, offset: .18 },
+    { transform: 'scale(1.17)', opacity: 0, offset: 1 }
+  ], { duration: 1600, easing: 'cubic-bezier(.16, 1, .3, 1)' });
+  activeWave = wave;
+  wave.onfinish = () => { if (activeWave === wave) activeWave = null; };
 }
+
+function renderGreekMaxim(text) {
+  const words = text.split(/\s+/u);
+  const fragment = document.createDocumentFragment();
+  words.forEach((word, index) => {
+    if (index) fragment.append(' ');
+    const span = document.createElement('span');
+    span.className = 'maxim-word';
+    span.style.setProperty('--word-order', Math.min(index, 8));
+    span.textContent = word;
+    fragment.append(span);
+  });
+  $('fact_text_greek').replaceChildren(fragment);
+  return words.length;
+}
+
+function showMaxim(index, animate = true) {
+  stopOracleTimer();
+  window.clearTimeout(transitionTimer);
+  isChanging = true;
+  pendingMaximIndex = index;
+  $('next-maxim').disabled = true;
+  progress.classList.remove('running');
+  const copy = $('oracle-copy');
+  copy.classList.remove('is-revealing');
+  const useMotion = animate && !prefersReducedMotion.matches && !document.hidden && !contemplating;
+
+  function reveal() {
+    currentIndex = index;
+    maximDeck = maximDeck.filter((item) => item !== index);
+    const [greek, spanish] = FACTS[index];
+    const wordCount = renderGreekMaxim(greek);
+    $('fact_text').textContent = spanish;
+    $('oracle-number').textContent = String(index + 1).padStart(3, '0');
+    $('oracle-announcement').textContent = spanish;
+    copy.classList.remove('is-changing');
+    if (useMotion) {
+      copy.classList.add('is-revealing');
+      pulseOracle();
+    }
+
+    function finish() {
+      copy.classList.remove('is-revealing');
+      isChanging = false;
+      pendingMaximIndex = null;
+      $('next-maxim').disabled = false;
+      syncPlayback(true);
+    }
+    const revealDuration = MAXIM_WORD_DURATION + Math.min(wordCount - 1, 8) * MAXIM_WORD_STAGGER;
+    if (useMotion) transitionTimer = window.setTimeout(finish, revealDuration);
+    else finish();
+  }
+
+  if (useMotion) {
+    copy.classList.add('is-changing');
+    transitionTimer = window.setTimeout(reveal, MAXIM_EXIT_DURATION);
+  } else reveal();
+}
+
+function showNextMaxim() {
+  if (!isChanging) showMaxim(nextMaximIndex());
+}
+
+function updatePauseButton() {
+  $('pause-oracle').setAttribute('aria-pressed', String(paused));
+  $('pause-oracle').setAttribute('aria-label', `${paused ? 'Reanudar' : 'Pausar'} las máximas (P)`);
+  $('playback-icon').setAttribute('href', paused ? '#icon-play' : '#icon-pause');
+  $('playback-label').textContent = paused ? 'EN PAUSA' : 'CADA 16 S';
+}
+
+function togglePause() {
+  paused = !paused;
+  try { localStorage.setItem('delfos-paused', String(paused)); } catch { /* Optional preference. */ }
+  updatePauseButton();
+  syncPlayback();
+}
+
+function toggleContemplation(force) {
+  contemplating = typeof force === 'boolean' ? force : !contemplating;
+  document.body.classList.toggle('contemplating', contemplating);
+  $('focus-mode').setAttribute('aria-pressed', String(contemplating));
+  $('focus-mode').setAttribute('aria-label', `${contemplating ? 'Salir del' : 'Activar'} modo contemplación (F)`);
+  $('focus-label').textContent = contemplating ? 'Volver' : 'Contemplar';
+  if (contemplating) $('focus-mode').focus({ preventScroll: true });
+  resetArt();
+  syncPlayback();
+}
+
+function normalizeSearch(text) {
+  return text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('es');
+}
+
+function renderArchive() {
+  const query = normalizeSearch($('maxim-search').value.trim());
+  const fragment = document.createDocumentFragment();
+  let count = 0;
+  FACTS.forEach(([greek, spanish], index) => {
+    if (!normalizeSearch(`${greek} ${spanish}`).includes(query)) return;
+    count += 1;
+    const row = document.createElement('button');
+    row.className = 'archive-row';
+    row.type = 'button';
+    row.dataset.index = index;
+    if (index === currentIndex) row.setAttribute('aria-current', 'true');
+    const number = document.createElement('span');
+    number.className = 'archive-row-number';
+    number.textContent = String(index + 1).padStart(3, '0');
+    const copy = document.createElement('span');
+    const greekText = document.createElement('span');
+    greekText.className = 'archive-row-greek';
+    greekText.lang = 'grc';
+    greekText.textContent = greek;
+    const spanishText = document.createElement('span');
+    spanishText.className = 'archive-row-spanish';
+    spanishText.textContent = spanish;
+    copy.append(greekText, spanishText);
+    const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    arrow.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '#icon-arrow');
+    arrow.append(use);
+    row.append(number, copy, arrow);
+    fragment.append(row);
+  });
+  $('archive-list').replaceChildren(fragment);
+  $('archive-count').textContent = `${count} ${count === 1 ? 'MÁXIMA' : 'MÁXIMAS'} · GRIEGO Y ESPAÑOL`;
+  $('archive-empty').hidden = count !== 0;
+}
+
+function openArchive() {
+  if (archive.open) return;
+  $('maxim-search').value = '';
+  renderArchive();
+  archive.showModal();
+  archive.scrollTop = 0;
+  $('maxim-search').focus({ preventScroll: true });
+  syncPlayback();
+}
+
+function updateClock() {
+  window.clearTimeout(clockTimer);
+  const now = new Date();
+  const clock = $('local-clock');
+  clock.textContent = new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+  clock.dateTime = now.toISOString();
+  $('local-date').textContent = new Intl.DateTimeFormat('es', { weekday: 'short', day: 'numeric', month: 'short' }).format(now);
+  if (!document.hidden) clockTimer = window.setTimeout(updateClock, 60000 - (Date.now() % 60000));
+}
+
+const hero = document.querySelector('.hero');
+let pointerFrame = 0;
+function resetArt() {
+  window.cancelAnimationFrame(pointerFrame);
+  pointerFrame = 0;
+  ['art', 'copy', 'orbit'].forEach((layer) => {
+    hero.style.removeProperty(`--${layer}-x`);
+    hero.style.removeProperty(`--${layer}-y`);
+  });
+}
+hero.addEventListener('pointermove', (event) => {
+  if (prefersReducedMotion.matches || !finePointer.matches || paused || contemplating || archive.open || document.hidden || pointerFrame) return;
+  pointerFrame = window.requestAnimationFrame(() => {
+    const bounds = hero.getBoundingClientRect();
+    const x = Math.max(-1, Math.min(1, ((event.clientX - bounds.left) / bounds.width - .5) * 2));
+    const y = Math.max(-1, Math.min(1, ((event.clientY - bounds.top) / bounds.height - .5) * 2));
+    hero.style.setProperty('--art-x', `${x * 22}px`);
+    hero.style.setProperty('--art-y', `${y * 14}px`);
+    hero.style.setProperty('--copy-x', `${x * -7}px`);
+    hero.style.setProperty('--copy-y', `${y * -5}px`);
+    hero.style.setProperty('--orbit-x', `${x * -12}px`);
+    hero.style.setProperty('--orbit-y', `${y * -8}px`);
+    pointerFrame = 0;
+  });
+});
+hero.addEventListener('pointerleave', resetArt);
+finePointer.addEventListener('change', resetArt);
+prefersReducedMotion.addEventListener('change', () => {
+  resetArt();
+  syncMotionState();
+  if (prefersReducedMotion.matches && pendingMaximIndex !== null) showMaxim(pendingMaximIndex, false);
+});
+
+$('next-maxim').addEventListener('click', showNextMaxim);
+$('pause-oracle').addEventListener('click', togglePause);
+$('focus-mode').addEventListener('click', () => toggleContemplation());
+$('open-archive').addEventListener('click', openArchive);
+$('close-archive').addEventListener('click', () => archive.close());
+$('maxim-search').addEventListener('input', renderArchive);
+$('archive-list').addEventListener('click', (event) => {
+  const row = event.target.closest('button[data-index]');
+  if (!row) return;
+  showMaxim(Number(row.dataset.index));
+  archive.close();
+});
+archive.addEventListener('close', () => syncPlayback());
+archive.addEventListener('keydown', (event) => {
+  // A search input otherwise consumes the first Escape to clear its value.
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    archive.close();
+  }
+}, { capture: true });
+archive.addEventListener('click', (event) => {
+  if (event.target !== archive) return;
+  const bounds = archive.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) archive.close();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || archive.open) return;
+  if (event.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (event.code === 'Space') {
+    if (event.target.closest('button, a')) return;
+    event.preventDefault();
+    showNextMaxim();
+  } else if (event.key.toLowerCase() === 'p') togglePause();
+  else if (event.key.toLowerCase() === 'f') toggleContemplation();
+  else if (event.key.toLowerCase() === 'a' && !contemplating) openArchive();
+});
+// Escape also works when the contemplation button has keyboard focus.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && contemplating && !archive.open) toggleContemplation(false);
+});
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    window.clearTimeout(oracleTimer);
-    window.clearInterval(ceramicTimer);
-    document.getElementById('oracle-progress').classList.remove('running');
-  } else {
-    scheduleOracle();
-    scheduleCeramicRotation();
-  }
+  document.body.classList.toggle('tab-hidden', document.hidden);
+  // Finish a pending reveal immediately so a hidden tab never freezes mid-word.
+  if (document.hidden && pendingMaximIndex !== null) showMaxim(pendingMaximIndex, false);
+  syncPlayback();
+  updateClock();
+  if (document.hidden) resetArt();
 });
 
-prefersReducedMotion.addEventListener('change', () => {
-  scheduleOracle();
-  scheduleCeramicRotation();
-});
-
-document.addEventListener('DOMContentLoaded', () => {
-  initCeramics();
-  showNextMaxim();
-});
+$('oracle-total').textContent = String(FACTS.length).padStart(3, '0');
+updatePauseButton();
+updateClock();
+showMaxim(nextMaximIndex(), false);
